@@ -78,10 +78,10 @@ resources:
     type: OS::Nova::Server
     properties:
       flavor: m1.small
-      key_name: { get_resource: sshkey }
+      key_name: Desktop
       image: ubuntu-16.04-docker-multinic
       networks:
-        - network: { get_resource: private }
+        - port: { get_resource: port }
         - network: { get_resource: nonroutable }
   
 outputs:
