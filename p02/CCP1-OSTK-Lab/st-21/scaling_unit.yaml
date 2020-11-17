@@ -1,0 +1,36 @@
+heat_template_version: 2016-10-14
+description: the VM that gets created when scaling happends
+parameters:
+  key_name:
+    type: string
+    description: SSH key to connect to the servers
+  metadata:
+    type: json
+
+resources:
+  port1:
+    type: OS::Neutron::Port
+    properties:
+      network: default_internal
+      security_groups:
+        - default
+  port2:
+    type: OS::Neutron::Port
+    properties:
+      network: nonroutable
+      security_groups:
+        - default
+  server:
+    type: OS::Nova::Server
+    properties:
+      flavor: m1.small
+      image: ubuntu-16.04-docker-multinic
+      key_name: {get_param: key_name}
+      metadata: {get_param: metadata}
+      networks:
+        - port: { get_resource: port1 }
+        - port: { get_resource: port2 }
+outputs:
+  internal_ip:
+    description: internal ip address of the server
+    value: { get_attr: [server, first_address] }

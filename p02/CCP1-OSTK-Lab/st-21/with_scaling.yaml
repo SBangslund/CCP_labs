@@ -1,0 +1,166 @@
+heat_template_version: 2016-10-14
+description: An example template for CCP-EN1 OSTK Lab
+
+resources:
+  sshkey1:
+    type: OS::Nova::KeyPair
+    properties:
+      name: testkey
+      save_private_key: true
+  sshkey2:
+    type: OS::Nova::KeyPair
+    properties:
+      name: testkey2
+      save_private_key: true
+  private:
+    type: OS::Neutron::Net
+    properties:
+      name: routable1
+  private_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      network_id: { get_resource: private }
+      cidr: 192.168.0.0/24
+      allocation_pools:
+        - start: 192.168.0.2
+          end: 192.168.0.254
+  internal:
+    type: OS::Neutron::Net
+    properties:
+      name: nonroutable
+  internal_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      network_id: { get_resource: internal }
+      cidr: 10.10.0.0/24
+      allocation_pools:
+        - start: 10.10.0.2
+          end: 10.10.0.254
+  router:
+    type: OS::Neutron::Router
+    properties:
+      external_gateway_info:
+        network: FLOATING_NETWORK_NAME
+  router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: router }
+      subnet_id: { get_resource: private_subnet }
+  port1:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_resource: private }
+      security_groups:
+        - default
+    depends_on: private
+  port2:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_resource: internal }
+      security_groups:
+        - default
+  floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: FLOATING_NETWORK_NAME
+  floating_ip_assoc:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: floating_ip }
+      port_id: { get_resource: port1 }
+    depends_on: router_interface
+
+  scaling_group:
+    type: OS::Heat::AutoScalingGroup
+    properties:
+      desired_capacity: 1
+      max_size: 3
+      min_size: 1
+      resource:
+        type: scaling_unit.yaml
+        properties:
+          key_name: { get_resource: sshkey2 }
+          metadata: {"metering.server_group": {get_param: "OS::stack_id"}}
+    depends_on: server
+  server_scaleup_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: {get_resource: scaling_group}
+      cooldown: 30
+      scaling_adjustment: 1
+  server_scaledown_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: {get_resource: scaling_group}
+      cooldown: 30
+      scaling_adjustment: -1
+  cpu_alarm_high:
+    type: OS::Aodh::GnocchiAggregationByResourcesAlarm
+    properties:
+      description: Scale up if CPU > 80%
+      metric: cpu_util
+      aggregation_method: mean
+      granularity: 300
+      evaluation_periods: 1
+      threshold: 0.8
+      resource_type: instance
+      comparison_operator: gt
+      alarm_actions:
+        - str_replace:
+            template: trust+url
+            params:
+              url: {get_attr: [server_scaleup_policy, signal_url]}
+      query:
+        list_join:
+          - ''
+          - - {'=': {server_group: {get_param: "OS::stack_id"}}}
+  cpu_alarm_low:
+    type: OS::Aodh::GnocchiAggregationByResourcesAlarm
+    properties:
+      description: Scale down if CPU < 20% for 5 minutes
+      metric: cpu_util
+      aggregation_method: mean
+      granularity: 300
+      evaluation_periods: 1
+      threshold: 0.2
+      resource_type: instance
+      comparison_operator: lt
+      alarm_actions:
+        - str_replace:
+            template: trust+url
+            params:
+              url: {get_attr: [server_scaledown_policy, signal_url]}
+      query:
+        list_join:
+          - ''
+          - - {'=': {server_group: {get_param: "OS::stack_id"}}}
+  server:
+    type: OS::Nova::Server
+    properties:
+      flavor: m1.small
+      key_name: { get_resource: sshkey1 }
+      image: ubuntu-16.04-docker-multinic
+      networks:
+        - port: { get_resource: port1 }
+        - port: { get_resource: port2 }
+outputs:
+  internal_ip:
+    description: internal ip address of the server
+    value: { get_attr: [server, first_address] }
+  public_ip:
+    description: floating ip associated with the server
+    value: { get_attr: [floating_ip, floating_ip_address] }
+  ssh_public_key:
+    description: The public key of the keypair
+    value: { get_attr: [sshkey1, public_key] }
+  ssh_private_key:
+    description: The private key of the keypair
+    value: { get_attr: [sshkey1, private_key] }
+  ssh_public_key_backend:
+    description: The public key of the keypair
+    value: { get_attr: [sshkey2, public_key] }
+  ssh_private_key_backend:
+    description: The private key of the keypair
+    value: { get_attr: [sshkey2, private_key] }

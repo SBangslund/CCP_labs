@@ -1,0 +1,105 @@
+heat_template_version: 2016-10-14
+description: An example template for CCP-EN1 OSTK Lab
+
+resources:
+  sshkey:
+    type: OS::Nova::KeyPair
+    properties:
+      name: autokey
+      save_private_key: true
+  private:
+    type: OS::Neutron::Net
+    properties:
+      name: myheatnet
+  private_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      network_id: { get_resource: private }
+      cidr: 192.168.0.0/24
+      gateway_ip: 192.168.0.1
+      allocation_pools:
+        - start: 192.168.0.2
+          end: 192.168.0.254
+  nonroutable:
+    type: OS::Neutron::Net
+    properties:
+      name: nonroutable
+  nonroutable_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      network_id: { get_resource: nonroutable }
+      cidr: 10.0.0.0/24
+      gateway_ip: 10.0.0.1
+      allocation_pools:
+        - start: 10.0.0.100
+          end: 10.0.0.150
+  router:
+    type: OS::Neutron::Router
+    properties:
+      external_gateway_info:
+        network: public1
+  router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: router }
+      subnet_id: { get_resource: private_subnet }
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_resource: private }
+      security_groups:
+        - ssh_http
+  floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: public1
+  floating_ip_assoc:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: floating_ip }
+      port_id: { get_resource: port }
+  server_01:
+    type: OS::Nova::Server
+    properties:
+      flavor: m1.small
+      key_name: { get_resource: sshkey }
+      image: ubuntu-16.04-docker-multinic
+      networks:
+        - network: { get_resource: nonroutable }
+  server_02:
+    type: OS::Nova::Server
+    properties:
+      flavor: m1.small
+      key_name: { get_resource: sshkey }
+      image: ubuntu-16.04-docker-multinic
+      networks:
+        - network: { get_resource: nonroutable }
+  server_03:
+    type: OS::Nova::Server
+    properties:
+      flavor: m1.small
+      key_name: { get_resource: sshkey }
+      image: ubuntu-16.04-docker-multinic
+      networks:
+        - network: { get_resource: private }
+        - network: { get_resource: nonroutable }
+  
+outputs:
+  internal_ip_01:
+    description: internal ip address of server_01
+    value: { get_attr: [server_01, first_address] }
+  internal_ip_02:
+    description: internal ip address of server_02
+    value: { get_attr: [server_02, first_address] }
+  internal_ip_03:
+    description: internal ip address of server_03
+    value: { get_attr: [server_03, first_address] }
+  public_ip:
+    description: floating ip associated with the server
+    value: { get_attr: [floating_ip, floating_ip_address] }
+  ssh_public_key:
+    description: The public key of the keypair
+    value: { get_attr: [sshkey, public_key] }
+  ssh_private_key:
+    description: The private key of the keypair
+    value: { get_attr: [sshkey, private_key] }
